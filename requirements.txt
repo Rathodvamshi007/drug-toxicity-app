@@ -4,4 +4,4 @@ requests
 matplotlib
 joblib
 scikit-learn
-rdkit-pypi
+pennylane
