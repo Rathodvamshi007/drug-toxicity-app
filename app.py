@@ -8,7 +8,7 @@ import requests
 # ==============================
 # PAGE CONFIG
 # ==============================
-st.set_page_config(page_title="Drug Toxicity Predictor", page_icon="🧬")
+st.set_page_config(page_title="Drug Toxicity Predictor (QML)", page_icon="🧬")
 
 # ==============================
 # STYLE
@@ -40,7 +40,6 @@ def load_users():
 def save_users(users):
     json.dump(users, open(USER_FILE, "w"))
 
-# Session state
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "page" not in st.session_state:
@@ -51,7 +50,6 @@ if "page" not in st.session_state:
 # ==============================
 def login():
     st.title("🔐 Login")
-
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
 
@@ -70,7 +68,6 @@ def login():
 
 def signup():
     st.title("📝 Signup")
-
     u = st.text_input("Create Username")
     p = st.text_input("Create Password", type="password")
 
@@ -109,21 +106,25 @@ except Exception as e:
     st.stop()
 
 # ==============================
-# PUBCHEM API (AUTO MODE)
+# PUBCHEM API (SAFE)
 # ==============================
 def get_features_from_name(name):
-    url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{name}/property/MolecularWeight,XLogP,HBondDonorCount,HBondAcceptorCount/JSON"
-    
     try:
+        url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{name}/property/MolecularWeight,XLogP,HBondDonorCount,HBondAcceptorCount/JSON"
         data = requests.get(url).json()
         props = data['PropertyTable']['Properties'][0]
 
-        return [
-            props['MolecularWeight'],
-            props['HBondDonorCount'],
-            props['HBondAcceptorCount'],
-            props['XLogP']
-        ]
+        mw = props.get('MolecularWeight', 0)
+        donors = props.get('HBondDonorCount', 0)
+        acceptors = props.get('HBondAcceptorCount', 0)
+        logp = props.get('XLogP', 0)
+
+        # Handle None
+        if logp is None:
+            logp = 0
+
+        return [float(mw), float(donors), float(acceptors), float(logp)]
+
     except:
         return None
 
@@ -133,67 +134,84 @@ def get_features_from_name(name):
 def main_app():
     st.title("🧬 Drug Toxicity Predictor")
 
-    mode = st.radio("Select Input Mode", ["Auto (Chemical Name)", "Manual"])
+    # ------------------------------
+    # QML Explanation
+    # ------------------------------
+    with st.expander("⚛️ How QML is used in this project"):
+        st.markdown("""
+        This application demonstrates a **Quantum Machine Learning (QML)-inspired model**.
 
-    # ==========================
+        🔹 Chemical properties are extracted from PubChem  
+        🔹 These features act as input to a neural model  
+        🔹 In real QML:
+            - Features → encoded into quantum states
+            - Quantum circuits → process information
+            - Measurement → gives prediction
+
+        ⚠️ Current implementation:
+        - Uses classical neural network (PyTorch)
+        - Simulates QML workflow conceptually
+
+        ✅ Advantage:
+        - Shows how QML can be applied in drug discovery
+        """)
+
+    mode = st.radio("Select Mode", ["Auto (Chemical Name)", "Manual"])
+
+    # ------------------------------
     # AUTO MODE
-    # ==========================
+    # ------------------------------
     if mode == "Auto (Chemical Name)":
-        st.subheader("🔍 Enter Chemical Name")
+        chem_name = st.text_input("Enter Chemical Name", placeholder="e.g., Aspirin")
 
-        chem_name = st.text_input("Chemical Name", placeholder="e.g., Aspirin")
+        if st.button("Predict"):
+            if not chem_name:
+                st.error("Please enter chemical name")
+                return
 
-        if st.button("Fetch & Predict"):
             features = get_features_from_name(chem_name)
 
             if features is None:
-                st.error("❌ Chemical not found or API error")
+                st.error("❌ Could not fetch data. Try another chemical.")
                 return
 
-            st.success("✅ Data fetched from PubChem")
+            st.success("✅ Data fetched")
 
             st.write(f"⚖️ Molecular Weight: {features[0]}")
             st.write(f"🔗 H-Bond Donors: {features[1]}")
             st.write(f"🔗 H-Bond Acceptors: {features[2]}")
             st.write(f"🧪 LogP: {features[3]}")
 
-            x = torch.tensor([features], dtype=torch.float32)
-            prob = model(x).item()
+            try:
+                x = torch.tensor([features], dtype=torch.float32)
+                prob = model(x).item()
+            except:
+                st.error("Prediction failed")
+                return
 
             st.subheader("📊 Result")
-            st.write(f"🧪 Chemical: **{chem_name}**")
+            st.write(f"🧪 Chemical: {chem_name}")
             st.write(f"⚠️ Toxicity Risk: {prob*100:.2f}%")
 
             if prob > 0.6:
-                st.error("⚠️ Toxic Compound")
+                st.error("⚠️ Toxic")
             else:
-                st.success("✅ Non-Toxic Compound")
+                st.success("✅ Non-Toxic")
 
-    # ==========================
+    # ------------------------------
     # MANUAL MODE
-    # ==========================
+    # ------------------------------
     else:
-        st.subheader("📊 Manual Input")
-
         f1 = st.number_input("Molecular Weight", value=200.0)
         f2 = st.number_input("H-Bond Donors", value=1.0)
         f3 = st.number_input("H-Bond Acceptors", value=2.0)
         f4 = st.number_input("LogP", value=1.0)
 
-        with st.expander("📘 How to find these values?"):
-            st.markdown("""
-            Use PubChem:
-            https://pubchem.ncbi.nlm.nih.gov
-            
-            Search chemical → Check properties
-            """)
-
-        if st.button("Predict"):
+        if st.button("Predict Manual"):
             x = torch.tensor([[f1, f2, f3, f4]], dtype=torch.float32)
             prob = model(x).item()
 
-            st.subheader("📊 Result")
-            st.write(f"⚠️ Toxicity Risk: {prob*100:.2f}%")
+            st.write(f"Toxicity Risk: {prob*100:.2f}%")
 
             if prob > 0.6:
                 st.error("⚠️ Toxic")
