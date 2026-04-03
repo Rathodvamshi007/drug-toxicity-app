@@ -4,13 +4,17 @@ import torch.nn as nn
 import json
 import os
 
+# RDKit
+from rdkit import Chem
+from rdkit.Chem import Descriptors
+
 # ==============================
 # PAGE CONFIG
 # ==============================
 st.set_page_config(page_title="Drug Toxicity Predictor", page_icon="🧬")
 
 # ==============================
-# BACKGROUND STYLE
+# STYLE
 # ==============================
 st.markdown("""
 <style>
@@ -22,83 +26,64 @@ st.markdown("""
     background-color: #00c6ff;
     color: black;
     border-radius: 10px;
-    height: 3em;
-    width: 100%;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================
-# USER FILE
+# USER SYSTEM
 # ==============================
 USER_FILE = "users.json"
 
 def load_users():
     if os.path.exists(USER_FILE):
-        with open(USER_FILE, "r") as f:
-            return json.load(f)
+        return json.load(open(USER_FILE))
     return {}
 
 def save_users(users):
-    with open(USER_FILE, "w") as f:
-        json.dump(users, f)
+    json.dump(users, open(USER_FILE, "w"))
 
-# ==============================
-# SESSION STATE
-# ==============================
+# Session
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
-
 if "page" not in st.session_state:
     st.session_state.page = "login"
 
 # ==============================
-# SIGNUP PAGE
-# ==============================
-def signup():
-    st.title("📝 Signup")
-
-    username = st.text_input("Create Username")
-    password = st.text_input("Create Password", type="password")
-
-    if st.button("Signup"):
-        users = load_users()
-
-        if username in users:
-            st.error("User already exists ❌")
-        else:
-            users[username] = password
-            save_users(users)
-            st.success("Account created successfully ✅")
-            st.session_state.page = "login"
-            st.rerun()
-
-    if st.button("Go to Login"):
-        st.session_state.page = "login"
-        st.rerun()
-
-# ==============================
-# LOGIN PAGE
+# LOGIN / SIGNUP
 # ==============================
 def login():
     st.title("🔐 Login")
-
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
 
     if st.button("Login"):
         users = load_users()
-
-        if username in users and users[username] == password:
+        if u in users and users[u] == p:
             st.session_state.logged_in = True
-            st.success("Login Successful ✅")
             st.rerun()
         else:
-            st.error("Invalid Credentials ❌")
+            st.error("Invalid credentials")
 
-    if st.button("Create Account"):
+    if st.button("Signup"):
         st.session_state.page = "signup"
         st.rerun()
+
+def signup():
+    st.title("📝 Signup")
+    u = st.text_input("Create Username")
+    p = st.text_input("Create Password", type="password")
+
+    if st.button("Create Account"):
+        users = load_users()
+        if u in users:
+            st.error("User exists")
+        else:
+            users[u] = p
+            save_users(users)
+            st.success("Account created")
+            st.session_state.page = "login"
+            st.rerun()
 
 # ==============================
 # MODEL
@@ -112,17 +97,30 @@ class SimpleModel(nn.Module):
 
     def forward(self, x):
         x = torch.relu(self.fc1(x))
-        x = self.fc2(x)
-        return self.sigmoid(x)
+        return self.sigmoid(self.fc2(x))
 
-# Safe loading
 try:
     model = SimpleModel()
     model.load_state_dict(torch.load("simple_model.pth", map_location="cpu"))
     model.eval()
 except Exception as e:
-    st.error(f"❌ Model loading failed: {e}")
+    st.error(f"Model load error: {e}")
     st.stop()
+
+# ==============================
+# FEATURE EXTRACTION (RDKit)
+# ==============================
+def get_features_from_smiles(smiles):
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return None
+
+    mw = Descriptors.MolWt(mol)
+    donors = Descriptors.NumHDonors(mol)
+    acceptors = Descriptors.NumHAcceptors(mol)
+    logp = Descriptors.MolLogP(mol)
+
+    return [mw, donors, acceptors, logp]
 
 # ==============================
 # MAIN APP
@@ -130,94 +128,74 @@ except Exception as e:
 def main_app():
     st.title("🧬 Drug Toxicity Predictor")
 
-    st.markdown("### 🧪 Enter Chemical Details")
+    mode = st.radio("Select Input Mode", ["Auto (SMILES)", "Manual"])
 
-    # Chemical Name
-    chem_name = st.text_input("🔎 Chemical Name (Optional)", placeholder="e.g., Aspirin")
+    # ==========================
+    # AUTO MODE
+    # ==========================
+    if mode == "Auto (SMILES)":
+        st.subheader("⚛️ Enter SMILES")
 
-    if chem_name:
-        st.info(f"You are analyzing: **{chem_name}**")
+        smiles = st.text_input(
+            "SMILES String",
+            placeholder="e.g., CC(=O)OC1=CC=CC=C1C(=O)O"
+        )
 
-    st.markdown("---")
+        if st.button("Auto Calculate & Predict"):
+            features = get_features_from_smiles(smiles)
 
-    # Inputs
-    st.subheader("📊 Chemical Properties")
+            if features is None:
+                st.error("Invalid SMILES ❌")
+                return
 
-    f1 = st.number_input(
-        "Molecular Weight",
-        value=200.0,
-        help="Total molecular mass (g/mol). Available on PubChem."
-    )
+            st.success("Features extracted ✅")
 
-    f2 = st.number_input(
-        "H-Bond Donors",
-        value=1.0,
-        help="Groups like -OH, -NH that donate hydrogen."
-    )
+            st.write(f"⚖️ Molecular Weight: {features[0]:.2f}")
+            st.write(f"🔗 H-Bond Donors: {features[1]}")
+            st.write(f"🔗 H-Bond Acceptors: {features[2]}")
+            st.write(f"🧪 LogP: {features[3]:.2f}")
 
-    f3 = st.number_input(
-        "H-Bond Acceptors",
-        value=2.0,
-        help="Atoms like O, N that accept hydrogen bonds."
-    )
-
-    f4 = st.number_input(
-        "LogP (Lipophilicity)",
-        value=1.0,
-        help="Measures fat vs water solubility."
-    )
-
-    # Help Section
-    with st.expander("📘 How to find these values?"):
-        st.markdown("""
-        🔗 PubChem: https://pubchem.ncbi.nlm.nih.gov  
-        🔗 ChemSpider: http://www.chemspider.com  
-
-        Steps:
-        1. Search chemical name  
-        2. Open compound page  
-        3. Find:
-           - Molecular Weight  
-           - H-Bond Donors/Acceptors  
-           - LogP  
-
-        Example:
-        Aspirin → MW: 180.16, Donors: 1, Acceptors: 4
-        """)
-
-    features = [f1, f2, f3, f4]
-
-    st.markdown("---")
-
-    # Prediction
-    if st.button("Predict"):
-        x = torch.tensor([features], dtype=torch.float32)
-
-        with torch.no_grad():
+            x = torch.tensor([features], dtype=torch.float32)
             prob = model(x).item()
 
-        st.subheader("📊 Result")
+            st.subheader("📊 Result")
+            st.write(f"Toxicity Risk: {prob*100:.2f}%")
 
-        if chem_name:
-            st.write(f"🧪 Chemical: **{chem_name}**")
+            if prob > 0.6:
+                st.error("⚠️ Toxic")
+            else:
+                st.success("✅ Non-Toxic")
 
-        st.write(f"🔢 Probability: {prob:.4f}")
-        st.write(f"⚠️ Toxicity Risk: {prob*100:.2f}%")
+    # ==========================
+    # MANUAL MODE
+    # ==========================
+    else:
+        st.subheader("📊 Manual Input")
 
-        if prob > 0.6:
-            st.error("⚠️ Toxic Compound")
-        else:
-            st.success("✅ Non-Toxic Compound")
+        f1 = st.number_input("Molecular Weight", value=200.0)
+        f2 = st.number_input("H-Bond Donors", value=1.0)
+        f3 = st.number_input("H-Bond Acceptors", value=2.0)
+        f4 = st.number_input("LogP", value=1.0)
 
-    st.markdown("---")
+        if st.button("Predict"):
+            x = torch.tensor([[f1, f2, f3, f4]], dtype=torch.float32)
+            prob = model(x).item()
 
+            st.write(f"Toxicity Risk: {prob*100:.2f}%")
+
+            if prob > 0.6:
+                st.error("⚠️ Toxic")
+            else:
+                st.success("✅ Non-Toxic")
+
+    # Logout
     if st.button("Logout"):
         st.session_state.logged_in = False
         st.session_state.page = "login"
         st.rerun()
 
 # ==============================
-# APP FLOW
+# FLOW
 # ==============================
 if st.session_state.logged_in:
     main_app()
