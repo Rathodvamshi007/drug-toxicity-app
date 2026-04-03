@@ -67,4 +67,4 @@ if st.button("Predict"):
 # FOOTER
 # ==============================
 st.markdown("---")
-st.caption("ML-based Drug Toxicity Prediction App")
+st.caption("QML-based Drug Toxicity Prediction App")
