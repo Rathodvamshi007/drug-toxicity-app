@@ -1,11 +1,13 @@
 import streamlit as st
 import torch
 import torch.nn as nn
+import json
+import os
 
 # ==============================
 # PAGE CONFIG
 # ==============================
-st.set_page_config(page_title="Drug Toxicity App", page_icon="🧬", layout="centered")
+st.set_page_config(page_title="Drug Toxicity App", page_icon="🧬")
 
 # ==============================
 # BACKGROUND STYLE
@@ -33,10 +35,53 @@ def set_bg():
 set_bg()
 
 # ==============================
+# USER DATA FILE
+# ==============================
+USER_FILE = "users.json"
+
+# Load users
+def load_users():
+    if os.path.exists(USER_FILE):
+        with open(USER_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+# Save users
+def save_users(users):
+    with open(USER_FILE, "w") as f:
+        json.dump(users, f)
+
+# ==============================
 # SESSION STATE
 # ==============================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
+
+if "page" not in st.session_state:
+    st.session_state.page = "login"
+
+# ==============================
+# SIGNUP PAGE
+# ==============================
+def signup():
+    st.title("📝 Signup")
+
+    username = st.text_input("Create Username")
+    password = st.text_input("Create Password", type="password")
+
+    if st.button("Signup"):
+        users = load_users()
+
+        if username in users:
+            st.error("User already exists ❌")
+        else:
+            users[username] = password
+            save_users(users)
+            st.success("Account created successfully ✅")
+            st.session_state.page = "login"
+
+    if st.button("Go to Login"):
+        st.session_state.page = "login"
 
 # ==============================
 # LOGIN PAGE
@@ -48,14 +93,19 @@ def login():
     password = st.text_input("Password", type="password")
 
     if st.button("Login"):
-        if username == "admin" and password == "1234":
+        users = load_users()
+
+        if username in users and users[username] == password:
             st.session_state.logged_in = True
             st.success("Login Successful ✅")
         else:
             st.error("Invalid Credentials ❌")
 
+    if st.button("Create Account"):
+        st.session_state.page = "signup"
+
 # ==============================
-# MODEL DEFINITION
+# MODEL
 # ==============================
 class SimpleModel(nn.Module):
     def __init__(self):
@@ -69,7 +119,6 @@ class SimpleModel(nn.Module):
         x = self.fc2(x)
         return self.sigmoid(x)
 
-# Load model
 model = SimpleModel()
 model.load_state_dict(torch.load("simple_model.pth", map_location="cpu"))
 model.eval()
@@ -82,7 +131,6 @@ def main_app():
 
     st.subheader("Enter Chemical Properties")
 
-    # Inputs
     f1 = st.number_input("Molecular Weight", value=200.0)
     f2 = st.number_input("H-Bond Donors", value=1.0)
     f3 = st.number_input("H-Bond Acceptors", value=2.0)
@@ -90,7 +138,6 @@ def main_app():
 
     features = [f1, f2, f3, f4]
 
-    # Prediction
     if st.button("Predict"):
         x = torch.tensor([features], dtype=torch.float32)
 
@@ -101,16 +148,15 @@ def main_app():
         st.write(f"🔢 Probability: {prob:.4f}")
         st.write(f"🧪 Toxicity Risk: {prob*100:.2f}%")
 
-        threshold = 0.6
-        if prob > threshold:
+        if prob > 0.6:
             st.error("⚠️ Toxic Compound")
         else:
             st.success("✅ Non-Toxic Compound")
 
-    # Logout
     st.markdown("---")
     if st.button("Logout"):
         st.session_state.logged_in = False
+        st.session_state.page = "login"
         st.rerun()
 
 # ==============================
@@ -119,4 +165,7 @@ def main_app():
 if st.session_state.logged_in:
     main_app()
 else:
-    login()
+    if st.session_state.page == "login":
+        login()
+    else:
+        signup()
