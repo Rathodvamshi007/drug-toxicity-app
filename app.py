@@ -212,12 +212,12 @@ def main_app():
             prob = model(x).item()
 
             st.write(f"Toxicity Risk: {prob*100:.2f}%")
-
-            if prob > 0.6:
+            if prob > 0.7:
                 st.error("⚠️ Toxic")
+            elif prob > 0.4:
+                st.warning("⚠️ Moderately Toxic")
             else:
                 st.success("✅ Non-Toxic")
-
     # Logout
     if st.button("Logout"):
         st.session_state.logged_in = False
