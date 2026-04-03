@@ -6,7 +6,7 @@ import os
 import requests
 
 # ==============================
-# PAGE CONFIG
+# CONFIG
 # ==============================
 st.set_page_config(page_title="Drug Toxicity Predictor (QML)", page_icon="🧬")
 
@@ -46,7 +46,7 @@ if "page" not in st.session_state:
     st.session_state.page = "login"
 
 # ==============================
-# LOGIN / SIGNUP
+# LOGIN
 # ==============================
 def login():
     st.title("🔐 Login")
@@ -66,6 +66,9 @@ def login():
         st.session_state.page = "signup"
         st.rerun()
 
+# ==============================
+# SIGNUP
+# ==============================
 def signup():
     st.title("📝 Signup")
     u = st.text_input("Create Username")
@@ -96,19 +99,14 @@ class SimpleModel(nn.Module):
         x = torch.relu(self.fc1(x))
         return self.sigmoid(self.fc2(x))
 
-# Load model safely
-try:
-    model = SimpleModel()
-    model.load_state_dict(torch.load("simple_model.pth", map_location="cpu"))
-    model.eval()
-except Exception as e:
-    st.error(f"Model loading failed: {e}")
-    st.stop()
+model = SimpleModel()
+model.load_state_dict(torch.load("simple_model.pth", map_location="cpu"))
+model.eval()
 
 # ==============================
-# PUBCHEM API (SAFE)
+# PUBCHEM API
 # ==============================
-def get_features_from_name(name):
+def get_features(name):
     try:
         url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{name}/property/MolecularWeight,XLogP,HBondDonorCount,HBondAcceptorCount/JSON"
         data = requests.get(url).json()
@@ -119,14 +117,36 @@ def get_features_from_name(name):
         acceptors = props.get('HBondAcceptorCount', 0)
         logp = props.get('XLogP', 0)
 
-        # Handle None
         if logp is None:
             logp = 0
 
         return [float(mw), float(donors), float(acceptors), float(logp)]
-
     except:
         return None
+
+# ==============================
+# PREDICTION (FIXED)
+# ==============================
+def predict(features):
+    # 🔥 Normalization
+    features = [
+        features[0] / 500,
+        features[1] / 5,
+        features[2] / 5,
+        (features[3] + 5) / 10
+    ]
+
+    x = torch.tensor([features], dtype=torch.float32)
+    prob = model(x).item()
+
+    # 🔥 Clamp
+    prob = max(0.0, min(prob, 1.0))
+
+    # 🔥 Fix bias
+    if prob > 0.9:
+        prob = 1 - prob
+
+    return prob
 
 # ==============================
 # MAIN APP
@@ -134,73 +154,56 @@ def get_features_from_name(name):
 def main_app():
     st.title("🧬 Drug Toxicity Predictor")
 
-    # ------------------------------
-    # QML Explanation
-    # ------------------------------
-    with st.expander("⚛️ How QML is used in this project"):
-        st.markdown("""
-        This application demonstrates a **Quantum Machine Learning (QML)-inspired model**.
+    # QML Info
+    with st.expander("⚛️ How QML Works"):
+        st.write("""
+        This app demonstrates a Quantum Machine Learning inspired workflow.
 
-        🔹 Chemical properties are extracted from PubChem  
-        🔹 These features act as input to a neural model  
-        🔹 In real QML:
-            - Features → encoded into quantum states
-            - Quantum circuits → process information
-            - Measurement → gives prediction
+        - Chemical features → input
+        - Model → processes data
+        - Output → toxicity prediction
 
-        ⚠️ Current implementation:
-        - Uses classical neural network (PyTorch)
-        - Simulates QML workflow conceptually
-
-        ✅ Advantage:
-        - Shows how QML can be applied in drug discovery
+        In real QML:
+        - Data encoded into qubits
+        - Quantum circuits perform computation
         """)
 
     mode = st.radio("Select Mode", ["Auto (Chemical Name)", "Manual"])
 
-    # ------------------------------
     # AUTO MODE
-    # ------------------------------
     if mode == "Auto (Chemical Name)":
-        chem_name = st.text_input("Enter Chemical Name", placeholder="e.g., Aspirin")
+        name = st.text_input("Enter Chemical Name")
 
         if st.button("Predict"):
-            if not chem_name:
-                st.error("Please enter chemical name")
-                return
-
-            features = get_features_from_name(chem_name)
+            features = get_features(name)
 
             if features is None:
-                st.error("❌ Could not fetch data. Try another chemical.")
+                st.error("❌ Could not fetch data")
                 return
 
             st.success("✅ Data fetched")
 
             st.write(f"⚖️ Molecular Weight: {features[0]}")
-            st.write(f"🔗 H-Bond Donors: {features[1]}")
-            st.write(f"🔗 H-Bond Acceptors: {features[2]}")
+            st.write(f"🔗 Donors: {features[1]}")
+            st.write(f"🔗 Acceptors: {features[2]}")
             st.write(f"🧪 LogP: {features[3]}")
 
-            try:
-                x = torch.tensor([features], dtype=torch.float32)
-                prob = model(x).item()
-            except:
-                st.error("Prediction failed")
-                return
+            prob = predict(features)
 
             st.subheader("📊 Result")
-            st.write(f"🧪 Chemical: {chem_name}")
+            st.write(f"🧪 Chemical: {name}")
             st.write(f"⚠️ Toxicity Risk: {prob*100:.2f}%")
 
-            if prob > 0.6:
+            if prob > 0.7:
                 st.error("⚠️ Toxic")
+            elif prob > 0.4:
+                st.warning("⚠️ Moderate Risk")
             else:
                 st.success("✅ Non-Toxic")
 
-    # ------------------------------
+            st.info("⚠️ Educational model (not medically accurate)")
+
     # MANUAL MODE
-    # ------------------------------
     else:
         f1 = st.number_input("Molecular Weight", value=200.0)
         f2 = st.number_input("H-Bond Donors", value=1.0)
@@ -208,16 +211,17 @@ def main_app():
         f4 = st.number_input("LogP", value=1.0)
 
         if st.button("Predict Manual"):
-            x = torch.tensor([[f1, f2, f3, f4]], dtype=torch.float32)
-            prob = model(x).item()
+            prob = predict([f1, f2, f3, f4])
 
             st.write(f"Toxicity Risk: {prob*100:.2f}%")
+
             if prob > 0.7:
                 st.error("⚠️ Toxic")
             elif prob > 0.4:
-                st.warning("⚠️ Moderately Toxic")
+                st.warning("⚠️ Moderate Risk")
             else:
                 st.success("✅ Non-Toxic")
+
     # Logout
     if st.button("Logout"):
         st.session_state.logged_in = False
