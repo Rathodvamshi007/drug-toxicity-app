@@ -3,10 +3,7 @@ import torch
 import torch.nn as nn
 import json
 import os
-
-# RDKit
-from rdkit import Chem
-from rdkit.Chem import Descriptors
+import requests
 
 # ==============================
 # PAGE CONFIG
@@ -43,7 +40,7 @@ def load_users():
 def save_users(users):
     json.dump(users, open(USER_FILE, "w"))
 
-# Session
+# Session state
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "page" not in st.session_state:
@@ -54,6 +51,7 @@ if "page" not in st.session_state:
 # ==============================
 def login():
     st.title("🔐 Login")
+
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
 
@@ -61,27 +59,29 @@ def login():
         users = load_users()
         if u in users and users[u] == p:
             st.session_state.logged_in = True
+            st.success("Login Successful ✅")
             st.rerun()
         else:
-            st.error("Invalid credentials")
+            st.error("Invalid credentials ❌")
 
-    if st.button("Signup"):
+    if st.button("Create Account"):
         st.session_state.page = "signup"
         st.rerun()
 
 def signup():
     st.title("📝 Signup")
+
     u = st.text_input("Create Username")
     p = st.text_input("Create Password", type="password")
 
-    if st.button("Create Account"):
+    if st.button("Signup"):
         users = load_users()
         if u in users:
-            st.error("User exists")
+            st.error("User already exists ❌")
         else:
             users[u] = p
             save_users(users)
-            st.success("Account created")
+            st.success("Account created ✅")
             st.session_state.page = "login"
             st.rerun()
 
@@ -99,28 +99,33 @@ class SimpleModel(nn.Module):
         x = torch.relu(self.fc1(x))
         return self.sigmoid(self.fc2(x))
 
+# Load model safely
 try:
     model = SimpleModel()
     model.load_state_dict(torch.load("simple_model.pth", map_location="cpu"))
     model.eval()
 except Exception as e:
-    st.error(f"Model load error: {e}")
+    st.error(f"Model loading failed: {e}")
     st.stop()
 
 # ==============================
-# FEATURE EXTRACTION (RDKit)
+# PUBCHEM API (AUTO MODE)
 # ==============================
-def get_features_from_smiles(smiles):
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
+def get_features_from_name(name):
+    url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{name}/property/MolecularWeight,XLogP,HBondDonorCount,HBondAcceptorCount/JSON"
+    
+    try:
+        data = requests.get(url).json()
+        props = data['PropertyTable']['Properties'][0]
+
+        return [
+            props['MolecularWeight'],
+            props['HBondDonorCount'],
+            props['HBondAcceptorCount'],
+            props['XLogP']
+        ]
+    except:
         return None
-
-    mw = Descriptors.MolWt(mol)
-    donors = Descriptors.NumHDonors(mol)
-    acceptors = Descriptors.NumHAcceptors(mol)
-    logp = Descriptors.MolLogP(mol)
-
-    return [mw, donors, acceptors, logp]
 
 # ==============================
 # MAIN APP
@@ -128,43 +133,41 @@ def get_features_from_smiles(smiles):
 def main_app():
     st.title("🧬 Drug Toxicity Predictor")
 
-    mode = st.radio("Select Input Mode", ["Auto (SMILES)", "Manual"])
+    mode = st.radio("Select Input Mode", ["Auto (Chemical Name)", "Manual"])
 
     # ==========================
     # AUTO MODE
     # ==========================
-    if mode == "Auto (SMILES)":
-        st.subheader("⚛️ Enter SMILES")
+    if mode == "Auto (Chemical Name)":
+        st.subheader("🔍 Enter Chemical Name")
 
-        smiles = st.text_input(
-            "SMILES String",
-            placeholder="e.g., CC(=O)OC1=CC=CC=C1C(=O)O"
-        )
+        chem_name = st.text_input("Chemical Name", placeholder="e.g., Aspirin")
 
-        if st.button("Auto Calculate & Predict"):
-            features = get_features_from_smiles(smiles)
+        if st.button("Fetch & Predict"):
+            features = get_features_from_name(chem_name)
 
             if features is None:
-                st.error("Invalid SMILES ❌")
+                st.error("❌ Chemical not found or API error")
                 return
 
-            st.success("Features extracted ✅")
+            st.success("✅ Data fetched from PubChem")
 
-            st.write(f"⚖️ Molecular Weight: {features[0]:.2f}")
+            st.write(f"⚖️ Molecular Weight: {features[0]}")
             st.write(f"🔗 H-Bond Donors: {features[1]}")
             st.write(f"🔗 H-Bond Acceptors: {features[2]}")
-            st.write(f"🧪 LogP: {features[3]:.2f}")
+            st.write(f"🧪 LogP: {features[3]}")
 
             x = torch.tensor([features], dtype=torch.float32)
             prob = model(x).item()
 
             st.subheader("📊 Result")
-            st.write(f"Toxicity Risk: {prob*100:.2f}%")
+            st.write(f"🧪 Chemical: **{chem_name}**")
+            st.write(f"⚠️ Toxicity Risk: {prob*100:.2f}%")
 
             if prob > 0.6:
-                st.error("⚠️ Toxic")
+                st.error("⚠️ Toxic Compound")
             else:
-                st.success("✅ Non-Toxic")
+                st.success("✅ Non-Toxic Compound")
 
     # ==========================
     # MANUAL MODE
@@ -177,11 +180,20 @@ def main_app():
         f3 = st.number_input("H-Bond Acceptors", value=2.0)
         f4 = st.number_input("LogP", value=1.0)
 
+        with st.expander("📘 How to find these values?"):
+            st.markdown("""
+            Use PubChem:
+            https://pubchem.ncbi.nlm.nih.gov
+            
+            Search chemical → Check properties
+            """)
+
         if st.button("Predict"):
             x = torch.tensor([[f1, f2, f3, f4]], dtype=torch.float32)
             prob = model(x).item()
 
-            st.write(f"Toxicity Risk: {prob*100:.2f}%")
+            st.subheader("📊 Result")
+            st.write(f"⚠️ Toxicity Risk: {prob*100:.2f}%")
 
             if prob > 0.6:
                 st.error("⚠️ Toxic")
