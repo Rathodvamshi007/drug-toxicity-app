@@ -215,7 +215,7 @@ def predict_probability(features):
 def risk_label(prob):
     if prob > 0.7:
         return "Toxic", "error"
-    if prob > 0.6:
+    if prob < 0.6:
         return "Moderate Risk", "warning"
     return "Non-Toxic", "success"
 
