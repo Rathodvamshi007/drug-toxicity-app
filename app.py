@@ -213,25 +213,12 @@ def predict_probability(features):
     return prob
 
 def risk_label(prob):
-    if prob > 0.7:
+    if prob >= 0.75:
         return "Toxic", "error"
-    elif prob > 0.5:
+    elif prob >= 0.60:
         return "Moderate Risk", "warning"
     else:
         return "Non-Toxic", "success"
-safe_smiles = ["O", "CCO"]  # water, ethanol
-
-def risk_label(prob, smiles=None):
-    if smiles in safe_smiles:
-        return "Non-Toxic", "success"
-    
-    if prob > 0.7:
-        return "Toxic", "error"
-    elif prob > 0.5:
-        return "Moderate Risk", "warning"
-    else:
-        return "Non-Toxic", "success"
-
 # ==============================
 # VISUALS
 # ==============================
